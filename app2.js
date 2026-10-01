@@ -1,0 +1,65 @@
+'use strict';
+/* 第2弾：試合分析・大会逆算・グラフ・行動記録・選手の声・振り返り・ドリル・CSV・A4印刷 */
+const CA={技術:'段階を1つ下げ、基礎動作・制約付きで反復',判断:'判断付きドリル（状況カード・声に出す）',タイミング:'時間制限・リズムの練習',身体操作:'B領域の身体操作・バランス',注意:'声かけ・ルーティン・確認',状況理解:'状況カードで場面を説明する',プレッシャー:'対人・得点付きで慣らす',コミュニケーション:'声出しの約束事・役割確認',疲労:'負荷・休息・投球数の見直し',練習転移不足:'ゲーム形式（段階4〜5）を増やす'};
+const BEH=['自分から行動した','仲間に声をかけた','失敗後に修正した','理由を説明した','次の行動を決めた'];
+const FB=['楽しかった','難しかった','できた','もう一度やりたい','自分で考えられた'];
+const MENU=[['game','試合分析'],['beh','行動記録'],['fbk','選手の声'],['rev','振り返り'],['plan','大会計画'],['chart','グラフ'],['drills','ドリル'],['print','A4印刷'],['csv','CSV']];
+const menuH=()=>'<div class="chips" style="margin-bottom:12px">'+MENU.map(([k,l])=>'<button onclick="go(\''+k+'\')">'+l+'</button>').join('')+'</div>';
+const tname=id=>(S.tasks.find(t=>t.id===id)||{name:'（削除済みの課題）'}).name;
+const lab=(t,v,sub)=>'<div style="margin:8px 0"><div class="row" style="justify-content:space-between"><span>'+esc(t)+'</span><b style="flex:0;white-space:nowrap">'+sub+'</b></div>'+bar(v)+'</div>';
+function migrate(){S.games=S.games||[];S.beh=S.beh||[];S.fb=S.fb||[];S.rev=S.rev||[];
+if((S.v||1)<2)TASKS0.forEach(([id,name,q,dom,scope,imp,tg,lv,min])=>{if(parseInt(id.slice(1))>10&&!S.tasks.some(t=>t.id===id))S.tasks.push({id,name,q,dom,scope,imp,tg,lv,min})});S.v=2}
+/* 前回の次回修正 / 選手の声 / 行動記録 */
+const lastRevH=()=>{const r=S.rev[S.rev.length-1];return r&&r.next?'<div class="card"><small>前回（'+r.d+'）の次回修正</small><p>'+esc(r.next)+'</p></div>':''};
+function fbHard(){const L=S.fb.length?S.fb[S.fb.length-1].d:null;if(!L)return false;const e=S.fb.filter(x=>x.d===L);return e.length>=3&&e.filter(x=>x.k==='難しかった').length/e.length>=.5}
+const behH=id=>{const lim30=ymd(Date.now()-30*864e5),e=S.beh.filter(x=>x.p===id&&x.d>=lim30);return '<h3>行動の記録（直近30日）</h3><p>'+(e.length?BEH.map(k=>[k,e.filter(x=>x.k===k).length]).filter(x=>x[1]).map(x=>esc(x[0])+' '+x[1]+'回').join('／'):'まだ記録がありません')+'</p><small>点数にはしません。</small>'};
+R.beh=()=>{const p=ctx.bp||(S.players[0]||{}).id;ctx.bp=p;return '<h2>行動記録</h2><small>見かけた行動をタップで残します（点数化しません）。</small><label>選手</label><select onchange="ctx.bp=this.value">'+opt(S.players.map(x=>[x.id,x.name]),p)+'</select><div class="chips" style="margin-top:10px">'+BEH.map(k=>'<button onclick="behAdd(\''+k+'\')">'+k+'</button>').join('')+'</div><p><small>今日の記録：'+S.beh.filter(x=>x.d===ymd(new Date())).length+'件</small></p>'};
+async function behAdd(k){S.beh.push({p:ctx.bp,k,d:ymd(new Date())});await save();toast('記録しました')}
+R.fbk=()=>{const t=ymd(new Date()),e=S.fb.filter(x=>x.d===t);return '<h2>選手の声</h2><small>選手が任意で押します。評価には使わず、次回の練習設計にだけ使います。</small><div class="chips" style="margin-top:10px">'+FB.map(k=>'<button onclick="fbAdd(\''+k+'\')">'+k+'</button>').join('')+'</div><div class="card" style="margin-top:12px"><small>今日の集計</small>'+FB.map(k=>'<p>'+k+'：'+e.filter(x=>x.k===k).length+'</p>').join('')+'</div>'};
+async function fbAdd(k){S.fb.push({k,d:ymd(new Date())});await save();toast('ありがとう');render()}
+/* 振り返り */
+R.rev=()=>'<h2>練習の振り返り</h2><button class="pri" onclick="revForm()">今日の振り返りを書く</button>'+S.rev.slice(-4).reverse().map(r=>'<div class="card"><small>'+r.d+'</small><p>良かった：'+esc(r.good)+'</p><p>問題：'+esc(r.issues)+'</p><p>次回修正：'+esc(r.next)+'</p></div>').join('');
+function revForm(){form('今日の振り返り',[['good','良かった点','text'],['issues','問題点','text'],['next','次回の修正','text']],{},async v=>{S.rev.push({d:ymd(new Date()),...v});await save();render()})}
+/* 試合分析 */
+const newGm=()=>({d:ymd(new Date()),opp:'',res:'',st:[],causes:[],sel:'',a:5,s:0,sub:'練習試合',load:'中',nw:'',nx:''});ctx.gm=newGm();
+R.game=()=>{const g=ctx.gm;if(!g.sel&&S.tasks[0])g.sel=S.tasks[0].id;
+return '<h2>試合分析</h2><div class="card"><label>日付</label><input type="date" value="'+g.d+'" onchange="ctx.gm.d=this.value"><label>相手</label><input value="'+esc(g.opp)+'" onchange="ctx.gm.opp=this.value"><label>結果</label><input value="'+esc(g.res)+'" onchange="ctx.gm.res=this.value"><label>実戦の種類</label><select onchange="ctx.gm.sub=this.value">'+opt(['練習試合','大会','公式戦','紅白戦','その他実戦'].map(x=>[x,x]),g.sub)+'</select><label>試合負荷</label><select onchange="ctx.gm.load=this.value">'+opt([['低','低'],['中','中'],['高','高']],g.load)+'</select><h3>プレーの記録</h3><select onchange="ctx.gm.sel=this.value">'+opt(S.tasks.map(t=>[t.id,t.name]),g.sel)+'</select><label>試行</label>'+stp('',g.a,1,"gmn('a',")+'<label>成功</label>'+stp('',g.s,1,"gmn('s',")+'<button class="sec" onclick="gmAdd()">この項目を追加</button>'+g.st.map((x,i)=>'<div class="item" onclick="ctx.gm.st.splice('+i+',1);render()"><span>'+esc(tname(x.task))+'</span><b>'+x.s+'/'+x.a+' ✕</b></div>').join('')+'<h3>原因の候補（複数可）</h3><div class="chips">'+Object.keys(CA).map(k=>'<button class="'+(g.causes.includes(k)?'on':'')+'" onclick="gmc(\''+k+'\')">'+k+'</button>').join('')+'</div><label>新たに発生した課題</label><input value="'+esc(g.nw)+'" onchange="ctx.gm.nw=this.value"><label>次回の全体練習で修正すること</label><input value="'+esc(g.nx)+'" onchange="ctx.gm.nx=this.value"><button class="pri" onclick="gmSave()">試合を保存</button></div>'+S.games.slice(-3).reverse().map(gameH).join('')}
+function gameH(g){const weak=g.st.filter(x=>x.a&&x.s/x.a<.7);return '<div class="card"><small>'+g.d+' '+esc(g.opp)+' '+esc(g.res)+' '+esc(g.sub||'')+' 負荷'+esc(g.load||'-')+'</small>'+g.st.map(x=>'<p>'+esc(tname(x.task))+'：'+x.s+'/'+x.a+'</p>').join('')+'<b>次の練習候補</b>'+(weak.length?weak.map(x=>'<p>・'+esc(tname(x.task))+'（'+Math.round(x.s/x.a*100)+'%）</p>').join(''):'<p>70%未満の項目はありません</p>')+(g.causes.length?'<b>原因の仮説と対応案</b>'+g.causes.map(c=>'<p>・'+c+'：'+CA[c]+'</p>').join(''):'')+gameExtra(g)+'<small>原因は仮説です。指導者が確認して決めてください。</small></div>'}
+function gmn(k,d){const g=ctx.gm;g[k]=Math.max(0,g[k]+d);if(g.s>g.a){if(k==='a')g.s=g.a;else g.a=g.s}render()}
+function gmc(k){const a=ctx.gm.causes,i=a.indexOf(k);i<0?a.push(k):a.splice(i,1);render()}
+function gmAdd(){const g=ctx.gm;if(!g.a)return toast('試行回数を入力してください');g.st.push({task:g.sel,a:g.a,s:g.s});render()}
+async function gmSave(){const g=ctx.gm;if(!g.st.length)return toast('プレーの記録を1つ以上追加してください');const id=Date.now();S.games.push({id,d:g.d,opp:g.opp,res:g.res,st:g.st,causes:g.causes,sub:g.sub,load:g.load,nw:g.nw,nx:g.nx});g.st.forEach(x=>S.rec.push({id:id+Math.random(),task:x.task,lv:5,a:x.a,s:x.s,p:'',d:g.d,g:id}));await save();ctx.gm=newGm();toast('保存しました。成功率と実戦転移に反映されます');render()}
+/* 大会逆算 */
+R.plan=()=>{const t=S.set.tourn;if(!t.date)return '<h2>大会計画</h2><div class="warn">先に大会日を設定してください。</div><button class="pri" onclick="tourn()">大会日を設定</button>';
+const D=new Date(t.date+'T00:00:00'),T=dleft(),F={30:'Bを中心に長期育成',21:'B＋A。課題を絞る',14:'A＋B。判断付きへ',7:'A中心。実戦で確認',3:'確認・精度・判断・ルーティン',1:'新しい技術は入れない。準備・声かけ・休養',0:'コンディション・ルーティン・投球数を確認'};
+return '<h2>大会逆算：'+esc(t.name||'')+'</h2><small>固定メニューではなく、今の成功率で変わります。投球数などは大会規定を確認してください。</small>'+[30,21,14,7,3,1,0].map(n=>{const dt=new Date(D);dt.setDate(dt.getDate()-n);const top=n>1?S.tasks.map(x=>prio(x,n)).sort((a,b)=>b.sc-a.sc).slice(0,2):[];
+return '<div class="card" style="'+(T!=null&&T<n?'opacity:.5':'')+'"><b>'+(n?n+'日前':'当日')+'</b>　'+ymd(dt)+'<p>'+F[n]+'</p>'+top.map(x=>'<p>・'+esc(x.t.name)+'<br><small>'+x.why.join('・')+'</small></p>').join('')+'</div>'}).join('')}
+/* グラフ */
+R.chart=()=>{const all=S.rec.reduce((o,x)=>({a:o.a+x.a,s:o.s+x.s}),{a:0,s:0}),T=dleft(),pid=ctx.cp||'';
+const tk=S.tasks.map(t=>({t,c:rate(t),tr:trate(t)}));
+const per=pid?S.tasks.map(t=>{const r=S.rec.filter(x=>x.task===t.id&&x.p===pid),a=r.reduce((s,x)=>s+x.a,0);return a?lab(t.name,r.reduce((s,x)=>s+x.s,0)/a,r.reduce((s,x)=>s+x.s,0)+'/'+a):''}).join('')||'<p>記録なし</p>':'';
+const imp=S.tasks.map(t=>{const r=S.rec.filter(x=>x.task===t.id);if(r.length<4)return '';const f=(a)=>{const n=a.reduce((s,x)=>s+x.a,0);return n?a.reduce((s,x)=>s+x.s,0)/n:null},b=f(r.slice(0,3)),l=f(r.slice(-3));return b==null||l==null?'':'<p>'+esc(t.name)+'：'+Math.round(b*100)+'% → '+Math.round(l*100)+'%（'+(l>=b?'+':'')+Math.round((l-b)*100)+'pt）</p>'}).join('')||'<p>各課題で記録が4件以上になると表示されます</p>';
+const w0=new Date(wk0()+'T00:00:00'),wk=[3,2,1,0].map(k=>{const s=new Date(w0);s.setDate(s.getDate()-7*k);const e=new Date(s);e.setDate(e.getDate()+7);const n=S.rec.filter(x=>x.d>=ymd(s)&&x.d<ymd(e)).reduce((a,x)=>a+x.a,0);return[ymd(s).slice(5),n]}),mx=Math.max(1,...wk.map(x=>x[1]));
+const days=[6,5,4,3,2,1,0].map(k=>{const d=ymd(Date.now()-k*864e5);return[d.slice(5),S.pitch.filter(x=>x.d===d).reduce((a,x)=>a+x.n,0)]}),pm=Math.max(1,...days.map(x=>x[1]));
+return '<h2>グラフ</h2><div class="card"><small>チーム全体の成功率</small><div class="big">'+(all.a?Math.round(all.s/all.a*100):'—')+'<span>%</span></div><small>大会まで '+(T==null?'—':T+'日')+'</small></div>'
++'<div class="card"><h3>課題別 成功率／実戦転移率</h3>'+tk.map(x=>lab(x.t.name,x.c?x.c.p:0,pc(x.c&&x.c.p))+(x.tr==null?'':'<small>実戦(段階4〜5)：'+pc(x.tr)+'</small>')).join('')+'</div>'
++'<div class="card"><h3>個人別 成功率</h3><select onchange="ctx.cp=this.value;render()"><option value="">選手を選ぶ</option>'+opt(S.players.map(p=>[p.id,p.name]),pid)+'</select>'+per+'</div>'
++'<div class="card"><h3>課題の改善（最初3件→直近3件）</h3>'+imp+'</div>'
++'<div class="card"><h3>練習量（週ごとの試行数）</h3>'+wk.map(x=>lab(x[0]+'週',x[1]/mx,x[1])).join('')+'</div>'
++'<div class="card"><h3>投球数（直近7日・チーム合計）</h3>'+days.map(x=>lab(x[0],x[1]/pm,x[1]+'球')).join('')+'</div>'}
+/* ドリル */
+R.drills=()=>{const q=ctx.dq||'';return '<h2>ドリル（'+DRILLS.length+'種）</h2><div class="chips" style="margin-bottom:10px">'+[['','全て'],['A','A'],['B','B'],['C','C'],['D','D']].map(([k,l])=>'<button class="'+(q===k?'on':'')+'" onclick="ctx.dq=\''+k+'\';render()">'+l+'</button>').join('')+'</div>'+DRILLS.filter(d=>!q||d.q===q).map(d=>'<details><summary>'+esc(d.n)+'　<span class="tag">'+d.q+'</span></summary><p>段階'+d.lv+'（'+LV[d.lv]+'）／'+d.min+'分／実戦転移 '+d.tr+'/5'+(d.pitch?'／<b>投球あり</b>':'')+'</p><p>目的：'+esc(d.aim)+'<br>手順：'+esc(d.steps)+'<br>成功基準：<b>'+esc(d.ok)+'</b><br>易しく：'+esc(d.easy)+'<br>難しく：'+esc(d.hard)+'<br><small>人数 '+d.pp+'／指導者 '+d.co+'／道具 '+esc(d.tools)+'</small></p></details>').join('')}
+/* A4印刷 */
+R.print=()=>{const p=S.plans.find(x=>x.d===ymd(new Date())),t=S.set.tourn,d=dleft();
+if(!p||!p.bl)return '<h2>A4印刷</h2><div class="warn">先に「今日」で練習案を採用してください。</div><button class="pri" onclick="go(\'today\')">今日の練習へ</button>';
+const pl=S.players.filter(x=>pday(x.id));
+return '<div class="a4"><button class="pri" onclick="window.print()">印刷する</button><h2>練習計画　'+p.d+'</h2><p>大会：'+esc(t.name||'未設定')+'（残り '+(d==null?'—':d)+' 日）／練習 '+p.min+'分／参加 '+(p.people||'—')+'人</p><p><b>今日の目標：</b>'+esc(p.focus.join(' / '))+'</p><table><tr><th>内容</th><th>分</th><th>メニュー</th><th>成功基準</th></tr>'+p.bl.map(b=>'<tr><td>'+esc(b.l)+'</td><td>'+b.min+'</td><td>'+esc(b.dr?b.dr.n+'（'+b.t+'）':b.t)+'</td><td>'+esc(b.dr?b.dr.ok:'')+'</td></tr>').join('')+'</table>'+(p.groups&&p.groups.length?'<p><b>グループ</b><br>'+p.groups.map(esc).join('<br>')+'</p>':'')+'<p><b>投球管理</b>：'+(pl.length?pl.map(x=>esc(x.name)+' '+pday(x.id)+'球').join('、'):'記録なし')+'</p><p><b>振り返り</b></p><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>'}
+/* CSV */
+function csvDown(name,rows){const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"',b=new Blob(['\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name+'.csv';a.click()}
+const CSVX={players:()=>[['name','grade','position','throw','bat','role'],...S.players.map(p=>[p.name,GRADES[p.grade],p.pos,p.th,p.bt,p.role])],
+skills:()=>[['date','task','level','attempts','success','player'],...S.rec.map(x=>[x.d,tname(x.task),x.lv,x.a,x.s,(S.players.find(p=>p.id===x.p)||{}).name||''])],
+practice_records:()=>[['date','title','minutes','focus','review_good','review_issues','review_next'],...S.plans.map(p=>{const r=S.rev.find(x=>x.d===p.d)||{};return[p.d,p.title,p.min,p.focus.join(' / '),r.good,r.issues,r.next]})],
+goals:()=>[['tournament','date'],[S.set.tourn.name,S.set.tourn.date]],
+game_records:()=>[['date','opponent','result','task','attempts','success','causes'],...S.games.flatMap(g=>g.st.map(x=>[g.d,g.opp,g.res,tname(x.task),x.a,x.s,g.causes.join('/')]))]};
+R.csv=()=>'<h2>CSV</h2><div class="card"><h3>選手の取り込み</h3><small>列：name,grade,position,throw,bat,role（1行目は見出し可）。追加で取り込みます。</small><button class="sec" onclick="$(\'#cf\').click()">CSVファイルを選ぶ</button><input id="cf" type="file" accept=".csv,.txt" hidden onchange="csvImp(this)"></div><div class="card"><h3>書き出し</h3>'+Object.keys(CSVX).map(k=>'<button class="sec" onclick="csvDown(\''+k+'\',CSVX.'+k+'())">'+k+'.csv</button>').join('')+'</div>'
+function csvImp(el){const f=el.files[0];if(!f)return;const r=new FileReader();r.onload=async()=>{try{const rows=r.result.replace(/^\ufeff/,'').split(/\r?\n/).filter(x=>x.trim()).map(l=>l.split(',').map(c=>c.replace(/^"|"$/g,'').trim()));if(rows[0]&&rows[0][0].toLowerCase()==='name')rows.shift();let n=0;rows.forEach((c,i)=>{if(!c[0])return;let g=GRADES.findIndex(x=>x===c[1]);if(g<0){g=parseInt(c[1]);if(isNaN(g)||g<0||g>6)g=3}S.players.push({id:'p'+Date.now()+i,name:c[0],grade:g,pos:c[2]||'',th:c[3]||'右',bt:c[4]||'右',role:c[5]||''});n++});await save();toast(n+'人を追加しました');go('players')}catch(e){toast('読み込めませんでした')}};r.readAsText(f)}

@@ -1,4 +1,4 @@
-const V='yakyu-v4',F=['./','index.html','styles.css','data.js','app.js','app2.js','manifest.webmanifest','icon-192.png','icon-512.png','icon-maskable-512.png','apple-touch-icon.png','favicon.png'];
+const V='yakyu-v5',F=['./','index.html','styles.css','data.js','app.js','app2.js','app3.js','manifest.webmanifest','icon-192.png','icon-512.png','icon-maskable-512.png','apple-touch-icon.png','favicon.png'];
 // 1ファイルが欠けても全体が失敗しないよう、個別に保存する
 self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>Promise.allSettled(F.map(u=>c.add(u)))).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==V).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});
